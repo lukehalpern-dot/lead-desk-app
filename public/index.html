@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Lead Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="masthead-top">
+      <h1>The Lead Desk</h1>
+      <div class="dateline" id="dateline"></div>
+    </div>
+    <div class="masthead-sub">A shared board of job leads — two beats, one desk</div>
+  </div>
+
+  <details class="settings" id="settingsPanel">
+    <summary>Edit beats &amp; profiles</summary>
+    <div class="settings-body" id="settingsBody"></div>
+    <div style="padding:0 16px 14px;">
+      <button class="reset-link" id="resetBtn" type="button">Clear this board</button>
+    </div>
+  </details>
+
+  <div class="tabs" id="tabs"></div>
+
+  <div class="context-strip" id="contextStrip"></div>
+
+  <div class="action-bar">
+    <button class="btn primary" id="findLeadsBtn" type="button">Find leads</button>
+    <button class="btn ghost" id="addTipBtn" type="button">+ File a tip</button>
+    <span class="status-msg" id="statusMsg"></span>
+  </div>
+
+  <div class="job-list" id="jobList"></div>
+
+  <details class="filed-section" id="filedSection">
+    <summary id="filedSummary">Filed (0)</summary>
+    <div class="job-list" id="filedList"></div>
+  </details>
+
+  <div class="footnote">
+    "Wire" leads are surfaced by a live web search when you click Find leads. "Tip" leads are the ones you added by hand.
+    This board is shared — anyone with this link can see and edit it. Job postings shift fast; always confirm details on the employer's own site before applying.
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="modalOverlay">
+  <div class="modal">
+    <h2>File a tip</h2>
+    <p class="hint">Add a job you found yourself to <span id="modalPersonName"></span>'s board.</p>
+    <form id="tipForm">
+      <div class="field"><label for="tipTitle">Job title *</label><input id="tipTitle" required></div>
+      <div class="field"><label for="tipCompany">Company *</label><input id="tipCompany" required></div>
+      <div class="field"><label for="tipLocation">Location</label><input id="tipLocation" placeholder="e.g. Hybrid — NYC"></div>
+      <div class="field"><label for="tipUrl">Posting URL</label><input id="tipUrl" type="url" placeholder="https://"></div>
+      <div class="field"><label for="tipNotes">Notes</label><textarea id="tipNotes" placeholder="Why this one's worth a look"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="cancelTipBtn">Cancel</button>
+        <button type="submit" class="btn primary">Add to board</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
