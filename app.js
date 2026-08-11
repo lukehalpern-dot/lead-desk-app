@@ -148,14 +148,15 @@ app.post("/api/find-leads", async (req, res) => {
       "- Seeking: " + person.seniority + " roles in healthcare-adjacent journalism, editorial, or content roles.\n" +
       "- Location requirement: " + person.location + ".\n" +
       "- Additional interest area to weight toward: " + person.interests + ".\n\n" +
-      "Search the web for REAL, currently open job postings from reputable employers (news outlets, health media, trade publications, consumer media, corporate editorial teams) that fit this profile. Prefer direct company career pages or well-known job boards. Do not invent postings — if you cannot verify something is real and currently listed, leave it out.\n\n" +
-      "Respond with ONLY a JSON array (no markdown code fences, no commentary before or after) of up to 4 objects, each with exactly these keys: \"title\", \"company\", \"location\", \"url\", \"notes\" (one short sentence on why it fits this profile).";
+      "Search thoroughly and from multiple angles before answering: check direct company career pages, LinkedIn Jobs, Indeed, MediaBistro, JournalismJobs.com, and other reputable journalism/media/health-media job boards. Vary your search terms (job titles, employer names, beats) rather than stopping after a single search — use as many searches as you're given to genuinely cover this well.\n\n" +
+      "Only include REAL, currently open postings you can directly verify from your search results — never invent a posting, employer, or URL. Note any evidence of how recent/active the listing is (a posting date, 'currently accepting applications' language, etc.) in the notes field. If a listing looks stale, expired, or you can't confirm it's still open, leave it out.\n\n" +
+      "Respond with ONLY a JSON array (no markdown code fences, no commentary before or after) of up to 8 objects, each with exactly these keys: \"title\", \"company\", \"location\", \"url\", \"notes\" (one short sentence on why it fits this profile, plus any recency signal you found).";
 
     const message = await anthropic.messages.create({
       model: "claude-sonnet-5",
-      max_tokens: 1200,
+      max_tokens: 3000,
       messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 8 }],
     });
 
     const joined = (message.content || [])
