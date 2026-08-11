@@ -11,6 +11,43 @@
   // paying for a search that's very likely to just re-find what's already there.
   var SEARCH_COOLDOWN_MINUTES = 30;
 
+  // Keep in sync with the ACCENT_COLORS set in app.js (the server) and the
+  // --accent-* custom properties in style.css.
+  var ACCENT_PALETTE = [
+    { key:"red",     label:"Red" },
+    { key:"teal",    label:"Teal" },
+    { key:"navy",    label:"Navy" },
+    { key:"forest",  label:"Forest" },
+    { key:"plum",    label:"Plum" },
+    { key:"burnt",   label:"Burnt orange" },
+    { key:"mustard", label:"Mustard" },
+    { key:"slate",   label:"Slate" }
+  ];
+
+  // Page theme is a personal, per-device display preference — stored in this
+  // browser's localStorage, not in the shared board data.
+  var THEMES = ["paper", "dark", "slate"];
+  var THEME_LABELS = { paper:"Paper", dark:"Dark", slate:"Slate" };
+  var THEME_STORAGE_KEY = "lead-desk:theme";
+
+  function applyTheme(theme){
+    if(THEMES.indexOf(theme) === -1) theme = "paper";
+    if(theme === "paper"){
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", theme);
+    }
+    document.getElementById("themeToggle").textContent = THEME_LABELS[theme] + " theme";
+    try{ localStorage.setItem(THEME_STORAGE_KEY, theme); }catch(e){ /* private browsing, etc. — fine to skip */ }
+  }
+
+  function cycleTheme(){
+    var current = "paper";
+    try{ current = localStorage.getItem(THEME_STORAGE_KEY) || "paper"; }catch(e){}
+    var next = THEMES[(THEMES.indexOf(current) + 1) % THEMES.length];
+    applyTheme(next);
+  }
+
   function fmtDate(iso){
     if(!iso) return "";
     var d = new Date(iso);
@@ -50,7 +87,10 @@
 
   function getPerson(id){ return people.find(function(p){ return p.id === id; }); }
   function displayName(p){ return p.name && p.name.trim() ? p.name.trim() : (p.id === "p1" ? "Person 1" : "Person 2"); }
-  function accentVar(p){ return p.color === "teal" ? "var(--teal)" : "var(--red)"; }
+  function accentVar(p){
+    var known = ACCENT_PALETTE.some(function(c){ return c.key === p.color; });
+    return "var(--accent-" + (known ? p.color : "red") + ")";
+  }
 
   function renderDateline(){
     var d = new Date();
@@ -70,6 +110,7 @@
         '<div class="field"><label>Interest area</label><textarea data-field="interests" data-person="'+p.id+'">'+escapeAttr(p.interests)+'</textarea></div>' +
         '<div class="field"><label>Location preference</label><input data-field="location" data-person="'+p.id+'" value="'+escapeAttr(p.location)+'"></div>' +
         '<div class="field"><label>Seniority</label><input data-field="seniority" data-person="'+p.id+'" value="'+escapeAttr(p.seniority)+'"></div>' +
+        '<div class="field"><label>Tab color</label><div class="swatch-row" data-swatches-person="'+p.id+'"></div></div>' +
         '<div class="blocklist" data-blocklist-person="'+p.id+'"></div>';
       body.appendChild(block);
     });
@@ -94,7 +135,43 @@
         }
       });
     });
+    renderSwatches();
     renderBlocklists();
+  }
+
+  function renderSwatches(){
+    people.forEach(function(p){
+      var container = document.querySelector('[data-swatches-person="'+p.id+'"]');
+      if(!container) return;
+      container.innerHTML = ACCENT_PALETTE.map(function(c){
+        var selected = (p.color === c.key) || (!p.color && c.key === "red");
+        return '<button type="button" class="swatch'+(selected?" selected":"")+'" style="background:var(--accent-'+c.key+')" ' +
+          'data-swatch-person="'+p.id+'" data-swatch-color="'+c.key+'" title="'+escapeAttr(c.label)+'" aria-label="'+escapeAttr(c.label)+'"></button>';
+      }).join("");
+    });
+    document.querySelectorAll("[data-swatch-color]").forEach(function(btn){
+      btn.addEventListener("click", async function(){
+        var personId = btn.getAttribute("data-swatch-person");
+        var color = btn.getAttribute("data-swatch-color");
+        var person = getPerson(personId);
+        var previous = person.color;
+        if(previous === color) return;
+        person.color = color;
+        renderSwatches();
+        renderTabs();
+        renderContextStrip();
+        try{
+          await api("/api/people/" + personId, { method:"PUT", body: JSON.stringify({ color: color }) });
+        }catch(err){
+          console.error(err);
+          person.color = previous;
+          renderSwatches();
+          renderTabs();
+          renderContextStrip();
+          showStatus("Couldn't save that color. Check your connection.", true);
+        }
+      });
+    });
   }
 
   function renderBlocklists(){
@@ -143,6 +220,7 @@
       var openCount = jobs.filter(function(j){ return j.personId === p.id && j.status === "open"; }).length;
       var btn = document.createElement("button");
       btn.className = "tab " + p.id + (p.id === activePersonId ? " active" : "");
+      if(p.id === activePersonId){ btn.style.borderBottomColor = accentVar(p); }
       btn.innerHTML = escapeHtml(displayName(p)) + ' <span class="count">('+openCount+')</span><span class="beat">'+escapeHtml(p.beatLabel)+'</span>';
       btn.addEventListener("click", function(){
         activePersonId = p.id;
@@ -467,6 +545,10 @@
   }
 
   async function init(){
+    var savedTheme = "paper";
+    try{ savedTheme = localStorage.getItem(THEME_STORAGE_KEY) || "paper"; }catch(e){}
+    applyTheme(savedTheme);
+
     renderDateline();
     try{
       await loadState();
@@ -478,6 +560,7 @@
     renderSettings();
     renderAll();
 
+    document.getElementById("themeToggle").addEventListener("click", cycleTheme);
     document.getElementById("findLeadsBtn").addEventListener("click", findLeads);
     document.getElementById("addTipBtn").addEventListener("click", openModal);
     document.getElementById("cancelTipBtn").addEventListener("click", closeModal);

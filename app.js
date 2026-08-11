@@ -38,9 +38,16 @@ app.get("/api/people", async (req, res) => {
   }
 });
 
+// Keep in sync with the ACCENT_PALETTE keys in public/app.js.
+const ACCENT_COLORS = new Set(["red", "teal", "navy", "forest", "plum", "burnt", "mustard", "slate"]);
+
 app.put("/api/people/:id", async (req, res) => {
   try {
-    const person = await db.updatePerson(req.params.id, req.body || {});
+    const fields = Object.assign({}, req.body || {});
+    if (fields.color !== undefined && !ACCENT_COLORS.has(fields.color)) {
+      return res.status(400).json({ error: "Not a recognized accent color." });
+    }
+    const person = await db.updatePerson(req.params.id, fields);
     if (!person) return res.status(404).json({ error: "No such person." });
     res.json(person);
   } catch (err) {

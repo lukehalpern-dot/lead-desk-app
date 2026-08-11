@@ -85,7 +85,7 @@ async function getPeople() {
 }
 
 async function updatePerson(id, fields) {
-  const allowed = ["name", "beat_label", "interests", "location", "seniority"];
+  const allowed = ["name", "beat_label", "interests", "location", "seniority", "color"];
   const sets = [];
   const values = [];
   let i = 1;
