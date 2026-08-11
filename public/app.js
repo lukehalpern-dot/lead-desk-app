@@ -3,12 +3,30 @@
 
   var people = [];
   var jobs = [];
+  var blockedCompanies = {}; // personId -> [company, ...]
   var activePersonId = "p1";
+
+  // A click within this window of the last completed search on the same profile
+  // triggers a confirm() warning instead of running immediately — protects against
+  // paying for a search that's very likely to just re-find what's already there.
+  var SEARCH_COOLDOWN_MINUTES = 30;
 
   function fmtDate(iso){
     if(!iso) return "";
     var d = new Date(iso);
     return d.toLocaleDateString(undefined, { month:"short", day:"numeric" });
+  }
+
+  function timeAgo(iso){
+    if(!iso) return "";
+    var ms = Date.now() - new Date(iso).getTime();
+    var min = Math.round(ms / 60000);
+    if(min < 1) return "just now";
+    if(min < 60) return min + " minute" + (min===1?"":"s") + " ago";
+    var hrs = Math.round(min / 60);
+    if(hrs < 24) return hrs + " hour" + (hrs===1?"":"s") + " ago";
+    var days = Math.round(hrs / 24);
+    return days + " day" + (days===1?"":"s") + " ago";
   }
 
   async function api(path, options){
@@ -25,6 +43,9 @@
   async function loadState(){
     people = await api("/api/people");
     jobs = await api("/api/jobs");
+    var lists = await Promise.all(people.map(function(p){ return api("/api/people/" + p.id + "/blocked-companies"); }));
+    blockedCompanies = {};
+    people.forEach(function(p, i){ blockedCompanies[p.id] = lists[i] || []; });
   }
 
   function getPerson(id){ return people.find(function(p){ return p.id === id; }); }
@@ -48,7 +69,8 @@
         '<div class="field"><label>Beat label</label><input data-field="beatLabel" data-person="'+p.id+'" value="'+escapeAttr(p.beatLabel)+'"></div>' +
         '<div class="field"><label>Interest area</label><textarea data-field="interests" data-person="'+p.id+'">'+escapeAttr(p.interests)+'</textarea></div>' +
         '<div class="field"><label>Location preference</label><input data-field="location" data-person="'+p.id+'" value="'+escapeAttr(p.location)+'"></div>' +
-        '<div class="field"><label>Seniority</label><input data-field="seniority" data-person="'+p.id+'" value="'+escapeAttr(p.seniority)+'"></div>';
+        '<div class="field"><label>Seniority</label><input data-field="seniority" data-person="'+p.id+'" value="'+escapeAttr(p.seniority)+'"></div>' +
+        '<div class="blocklist" data-blocklist-person="'+p.id+'"></div>';
       body.appendChild(block);
     });
     body.querySelectorAll("input,textarea").forEach(function(el){
@@ -69,6 +91,43 @@
           renderTabs();
           renderContextStrip();
           showStatus("Couldn't save that change. Check your connection.", true);
+        }
+      });
+    });
+    renderBlocklists();
+  }
+
+  function renderBlocklists(){
+    people.forEach(function(p){
+      var container = document.querySelector('[data-blocklist-person="'+p.id+'"]');
+      if(!container) return;
+      var list = blockedCompanies[p.id] || [];
+      if(list.length === 0){
+        container.innerHTML =
+          '<div class="blocklist-label">Not interested in</div>' +
+          '<div class="blocklist-empty">Nothing blocked — use "not a fit" on a search result to add one.</div>';
+        return;
+      }
+      container.innerHTML =
+        '<div class="blocklist-label">Not interested in</div>' +
+        '<div class="blocklist-chips">' +
+        list.map(function(company){
+          return '<span class="blocklist-chip">'+escapeHtml(company)+
+            '<button type="button" data-unblock-person="'+p.id+'" data-unblock-company="'+escapeAttr(company)+'" title="Stop blocking this employer">×</button></span>';
+        }).join('') +
+        '</div>';
+    });
+    document.querySelectorAll("[data-unblock-company]").forEach(function(btn){
+      btn.addEventListener("click", async function(){
+        var personId = btn.getAttribute("data-unblock-person");
+        var company = btn.getAttribute("data-unblock-company");
+        try{
+          await api("/api/people/" + personId + "/blocked-companies/" + encodeURIComponent(company), { method:"DELETE" });
+          blockedCompanies[personId] = (blockedCompanies[personId] || []).filter(function(c){ return c !== company; });
+          renderBlocklists();
+        }catch(err){
+          console.error(err);
+          showStatus("Couldn't update the blocklist. Check your connection.", true);
         }
       });
     });
@@ -101,6 +160,20 @@
       '<b>Also covers:</b> ' + escapeHtml(p.interests);
     document.getElementById("findLeadsBtn").style.background = accentVar(p);
     document.documentElement.style.setProperty("--accent", accentVar(p));
+    renderLastSearched();
+  }
+
+  function renderLastSearched(){
+    var p = getPerson(activePersonId);
+    var el = document.getElementById("lastSearched");
+    if(!p.lastSearchedAt){
+      el.textContent = "Never searched yet on this profile.";
+      el.classList.remove("recent");
+      return;
+    }
+    var minsAgo = (Date.now() - new Date(p.lastSearchedAt).getTime()) / 60000;
+    el.textContent = "Last searched " + timeAgo(p.lastSearchedAt) + ".";
+    el.classList.toggle("recent", minsAgo < SEARCH_COOLDOWN_MINUTES);
   }
 
   // mode: "open" | "filed" | "candidate"
@@ -114,12 +187,18 @@
     }
     if(mode === "candidate"){
       actions += '<button class="link-btn add-to-board" data-action="promote" data-id="'+job.id+'">Add to board</button>';
+      if(job.company){
+        actions += '<button class="link-btn not-a-fit" data-action="notafit" data-id="'+job.id+'">not a fit</button>';
+      } else {
+        actions += '<button class="link-btn spike" data-action="spike" data-id="'+job.id+'">spike</button>';
+      }
     } else if(mode === "filed"){
       actions += '<button class="link-btn" data-action="reopen" data-id="'+job.id+'">Reopen</button>';
+      actions += '<button class="link-btn spike" data-action="spike" data-id="'+job.id+'">spike</button>';
     } else {
       actions += '<button class="link-btn mark-filed" data-action="file" data-id="'+job.id+'">Mark filed</button>';
+      actions += '<button class="link-btn spike" data-action="spike" data-id="'+job.id+'">spike</button>';
     }
-    actions += '<button class="link-btn spike" data-action="spike" data-id="'+job.id+'">spike</button>';
 
     return (
       '<div class="job-card'+(mode === "candidate" ? " job-card-candidate" : "")+'">' +
@@ -193,6 +272,16 @@
           if(!confirm("Spike this lead? This removes it from the board.")) return;
           await api("/api/jobs/" + id, { method:"DELETE" });
           jobs = jobs.filter(function(j){ return j.id !== id; });
+        } else if(action === "notafit"){
+          if(!confirm('Discard this and stop suggesting jobs from "'+job.company+'" in future searches?')) return;
+          await api("/api/jobs/" + id, { method:"DELETE", body: JSON.stringify({ blockCompany: job.company, personId: job.personId }) });
+          jobs = jobs.filter(function(j){ return j.id !== id; });
+          blockedCompanies[job.personId] = blockedCompanies[job.personId] || [];
+          if(blockedCompanies[job.personId].indexOf(job.company) === -1){
+            blockedCompanies[job.personId].push(job.company);
+            blockedCompanies[job.personId].sort();
+          }
+          renderBlocklists();
         }
         renderTabs();
         renderJobs();
@@ -221,10 +310,25 @@
 
   async function findLeads(){
     var person = getPerson(activePersonId);
+
+    if(person.lastSearchedAt){
+      var minsAgo = (Date.now() - new Date(person.lastSearchedAt).getTime()) / 60000;
+      if(minsAgo < SEARCH_COOLDOWN_MINUTES){
+        var proceed = confirm(
+          "You searched " + displayName(person) + "'s profile " + timeAgo(person.lastSearchedAt) + ". " +
+          "Real postings rarely change that fast, so this search will likely just re-find what's already here (and it still costs the same either way).\n\n" +
+          "Run it anyway?"
+        );
+        if(!proceed) return;
+      }
+    }
+
     setLoading(true);
     showStatus("");
     try{
       var result = await api("/api/find-leads", { method:"POST", body: JSON.stringify({ personId: person.id }) });
+      person.lastSearchedAt = new Date().toISOString();
+      renderLastSearched();
       if(result.added > 0){
         jobs = await api("/api/jobs");
         renderTabs();
@@ -242,11 +346,44 @@
   function openModal(){
     document.getElementById("modalPersonName").textContent = displayName(getPerson(activePersonId));
     document.getElementById("modalOverlay").classList.remove("hidden");
-    document.getElementById("tipTitle").focus();
+    document.getElementById("lookupStatus").textContent = "";
+    document.getElementById("tipUrl").focus();
   }
   function closeModal(){
     document.getElementById("modalOverlay").classList.add("hidden");
     document.getElementById("tipForm").reset();
+    document.getElementById("lookupStatus").textContent = "";
+  }
+
+  async function handleLookup(){
+    var url = document.getElementById("tipUrl").value.trim();
+    var statusEl = document.getElementById("lookupStatus");
+    if(!url){
+      statusEl.textContent = "Paste a URL above first.";
+      statusEl.className = "lookup-status error";
+      return;
+    }
+    statusEl.textContent = "Looking up…";
+    statusEl.className = "lookup-status";
+    try{
+      var result = await api("/api/fetch-preview?url=" + encodeURIComponent(url));
+      var titleEl = document.getElementById("tipTitle");
+      var companyEl = document.getElementById("tipCompany");
+      if(result.ok){
+        var filledSomething = false;
+        if(result.title && !titleEl.value.trim()){ titleEl.value = result.title; filledSomething = true; }
+        if(result.company && !companyEl.value.trim()){ companyEl.value = result.company; filledSomething = true; }
+        statusEl.textContent = filledSomething ? "Filled in what we could find — check it over." : "Couldn't find a title/company on that page — fill in by hand.";
+        statusEl.className = "lookup-status";
+      } else {
+        statusEl.textContent = result.message || "Couldn't fetch that page — fill in by hand.";
+        statusEl.className = "lookup-status error";
+      }
+    }catch(err){
+      console.error(err);
+      statusEl.textContent = "Couldn't fetch that page — fill in by hand.";
+      statusEl.className = "lookup-status error";
+    }
   }
 
   async function handleTipSubmit(e){
@@ -284,7 +421,46 @@
     }
   }
 
+  function csvField(v){
+    var s = (v === null || v === undefined) ? "" : String(v);
+    if(/[",\n]/.test(s)) s = '"' + s.replace(/"/g,'""') + '"';
+    return s;
+  }
+
+  function handleExport(){
+    var header = ["Person","Status","Source","Title","Company","Location","URL","Notes","Date added","Date filed"];
+    var rows = jobs.map(function(j){
+      var p = getPerson(j.personId);
+      return [
+        p ? displayName(p) : j.personId,
+        j.status,
+        j.source,
+        j.title,
+        j.company,
+        j.location,
+        j.url,
+        j.notes,
+        j.dateAdded || "",
+        j.dateFiled || ""
+      ].map(csvField).join(",");
+    });
+    var csv = header.map(csvField).join(",") + "\n" + rows.join("\n");
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "lead-desk-export-" + new Date().toISOString().slice(0,10) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   function renderAll(){
+    // renderAll() only runs on init and on tab switch — clearing the status message here
+    // (not inside findLeads' own render calls) stops a stale "N leads found" message from
+    // a search on the OTHER person's tab from following you when you switch tabs.
+    showStatus("");
     renderTabs();
     renderContextStrip();
     renderJobs();
@@ -307,7 +483,9 @@
     document.getElementById("cancelTipBtn").addEventListener("click", closeModal);
     document.getElementById("modalOverlay").addEventListener("click", function(e){ if(e.target.id === "modalOverlay") closeModal(); });
     document.getElementById("tipForm").addEventListener("submit", handleTipSubmit);
+    document.getElementById("lookupBtn").addEventListener("click", handleLookup);
     document.getElementById("resetBtn").addEventListener("click", handleReset);
+    document.getElementById("exportBtn").addEventListener("click", handleExport);
   }
 
   init();

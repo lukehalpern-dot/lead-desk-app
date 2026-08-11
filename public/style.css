@@ -146,6 +146,58 @@ details.settings[open] summary:after{ transform:rotate(180deg); }
   padding:0;
   justify-self:start;
 }
+.settings-footer-actions{
+  padding:0 16px 14px;
+  display:flex;
+  gap:18px;
+  flex-wrap:wrap;
+}
+
+/* Blocklist chips (per person, in settings) */
+.blocklist{
+  grid-column:1/-1;
+  margin-top:2px;
+}
+.blocklist-label{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:0.06em;
+  color:var(--ink-faint);
+  margin-bottom:4px;
+}
+.blocklist-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+.blocklist-chip{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  background:#fff;
+  border:1px solid var(--rule);
+  border-radius:999px;
+  padding:3px 6px 3px 10px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:var(--ink-soft);
+}
+.blocklist-chip button{
+  background:none;
+  border:none;
+  cursor:pointer;
+  color:var(--ink-faint);
+  font-size:13px;
+  line-height:1;
+  padding:2px;
+}
+.blocklist-chip button:hover{ color:var(--red); }
+.blocklist-empty{
+  font-size:11.5px;
+  color:var(--ink-faint);
+  font-style:italic;
+}
 
 /* Tabs */
 .tabs{
@@ -229,6 +281,14 @@ button.btn.ghost:hover{ background:var(--ink); color:#fff; }
 }
 .context-strip b{ color:var(--ink-soft); font-weight:500; }
 
+.last-searched{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  color:var(--ink-faint);
+  margin-bottom:2px;
+}
+.last-searched.recent{ color:var(--accent); }
+
 /* Job cards */
 .job-list{ margin-top:4px; }
 .job-card{
@@ -301,6 +361,7 @@ button.btn.ghost:hover{ background:var(--ink); color:#fff; }
 .link-btn.mark-filed{ color:var(--ink-soft); text-decoration:none; border:1px solid var(--rule); padding:4px 9px; border-radius:var(--radius-sm); }
 .link-btn.mark-filed:hover{ border-color:var(--ink); color:var(--ink); }
 .link-btn.spike:hover{ color:var(--red); }
+.link-btn.not-a-fit:hover{ color:var(--red); }
 
 .stamp{
   font-family:'IBM Plex Mono',monospace;
@@ -406,6 +467,23 @@ details.candidates-section summary::-webkit-details-marker{ display:none; }
   gap:10px;
   margin-top:14px;
 }
+.url-lookup-row{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+.url-lookup-row input{ flex:1; }
+.lookup-btn{
+  white-space:nowrap;
+  flex-shrink:0;
+}
+.lookup-status{
+  font-size:11px;
+  color:var(--ink-faint);
+  margin:4px 0 0;
+  min-height:1em;
+}
+.lookup-status.error{ color:var(--red); }
 
 .footnote{
   margin-top:40px;

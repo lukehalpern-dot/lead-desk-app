@@ -23,7 +23,8 @@
   <details class="settings" id="settingsPanel">
     <summary>Edit beats &amp; profiles</summary>
     <div class="settings-body" id="settingsBody"></div>
-    <div style="padding:0 16px 14px;">
+    <div class="settings-footer-actions">
+      <button class="reset-link" id="exportBtn" type="button">Export board as CSV</button>
       <button class="reset-link" id="resetBtn" type="button">Clear this board</button>
     </div>
   </details>
@@ -31,6 +32,7 @@
   <div class="tabs" id="tabs"></div>
 
   <div class="context-strip" id="contextStrip"></div>
+  <div class="last-searched" id="lastSearched"></div>
 
   <div class="action-bar">
     <button class="btn primary" id="findLeadsBtn" type="button">Find leads</button>
@@ -62,10 +64,17 @@
     <h2>File a tip</h2>
     <p class="hint">Add a job you found yourself to <span id="modalPersonName"></span>'s board.</p>
     <form id="tipForm">
+      <div class="field">
+        <label for="tipUrl">Posting URL</label>
+        <div class="url-lookup-row">
+          <input id="tipUrl" type="url" placeholder="https://">
+          <button type="button" class="link-btn lookup-btn" id="lookupBtn">Look up details</button>
+        </div>
+        <p class="lookup-status" id="lookupStatus"></p>
+      </div>
       <div class="field"><label for="tipTitle">Job title *</label><input id="tipTitle" required></div>
       <div class="field"><label for="tipCompany">Company *</label><input id="tipCompany" required></div>
       <div class="field"><label for="tipLocation">Location</label><input id="tipLocation" placeholder="e.g. Hybrid — NYC"></div>
-      <div class="field"><label for="tipUrl">Posting URL</label><input id="tipUrl" type="url" placeholder="https://"></div>
       <div class="field"><label for="tipNotes">Notes</label><textarea id="tipNotes" placeholder="Why this one's worth a look"></textarea></div>
       <div class="modal-actions">
         <button type="button" class="btn ghost" id="cancelTipBtn">Cancel</button>

@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS people (
   color       TEXT NOT NULL DEFAULT 'red'
 );
 
+-- Added after the initial launch — ADD COLUMN IF NOT EXISTS keeps this safe to
+-- re-run against a database that already has the people table.
+ALTER TABLE people ADD COLUMN IF NOT EXISTS last_searched_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS jobs (
   id          TEXT PRIMARY KEY,
   person_id   TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
@@ -26,6 +30,14 @@ CREATE TABLE IF NOT EXISTS jobs (
   status      TEXT NOT NULL DEFAULT 'open',
   date_added  TIMESTAMPTZ NOT NULL DEFAULT now(),
   date_filed  TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS blocked_companies (
+  id          SERIAL PRIMARY KEY,
+  person_id   TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  company     TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(person_id, company)
 );
 
 INSERT INTO people (id, name, beat_label, interests, location, seniority, color)
@@ -95,6 +107,10 @@ async function getPerson(id) {
   return rows[0] ? rowToPerson(rows[0]) : null;
 }
 
+async function touchLastSearched(id) {
+  await getPool().query("UPDATE people SET last_searched_at = now() WHERE id = $1", [id]);
+}
+
 async function getJobs() {
   const { rows } = await getPool().query("SELECT * FROM jobs ORDER BY date_added DESC");
   return rows.map(rowToJob);
@@ -135,6 +151,28 @@ async function existingUrlsForPerson(personId) {
   return new Set(rows.map((r) => r.url));
 }
 
+async function blockCompany(personId, company) {
+  company = (company || "").trim();
+  if (!company) return;
+  await getPool().query(
+    `INSERT INTO blocked_companies (person_id, company) VALUES ($1, $2)
+     ON CONFLICT (person_id, company) DO NOTHING`,
+    [personId, company]
+  );
+}
+
+async function unblockCompany(personId, company) {
+  await getPool().query("DELETE FROM blocked_companies WHERE person_id = $1 AND company = $2", [personId, company]);
+}
+
+async function getBlockedCompanies(personId) {
+  const { rows } = await getPool().query(
+    "SELECT company FROM blocked_companies WHERE person_id = $1 ORDER BY company",
+    [personId]
+  );
+  return rows.map((r) => r.company);
+}
+
 function rowToPerson(r) {
   return {
     id: r.id,
@@ -144,6 +182,7 @@ function rowToPerson(r) {
     location: r.location,
     seniority: r.seniority,
     color: r.color,
+    lastSearchedAt: r.last_searched_at,
   };
 }
 
@@ -172,10 +211,14 @@ module.exports = {
   getPeople,
   getPerson,
   updatePerson,
+  touchLastSearched,
   getJobs,
   addJob,
   setJobStatus,
   deleteJob,
   resetJobs,
   existingUrlsForPerson,
+  blockCompany,
+  unblockCompany,
+  getBlockedCompanies,
 };

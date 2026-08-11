@@ -1,5 +1,7 @@
 -- The Lead Desk — database schema
 -- Safe to run multiple times (IF NOT EXISTS everywhere).
+-- Note: db.js embeds this same schema as a JS string for Vercel bundling reasons;
+-- this file is kept for reference / manual use only, not read at runtime.
 
 CREATE TABLE IF NOT EXISTS people (
   id          TEXT PRIMARY KEY,
@@ -11,6 +13,8 @@ CREATE TABLE IF NOT EXISTS people (
   color       TEXT NOT NULL DEFAULT 'red'
 );
 
+ALTER TABLE people ADD COLUMN IF NOT EXISTS last_searched_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS jobs (
   id          TEXT PRIMARY KEY,
   person_id   TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
@@ -20,9 +24,17 @@ CREATE TABLE IF NOT EXISTS jobs (
   url         TEXT NOT NULL DEFAULT '',
   notes       TEXT NOT NULL DEFAULT '',
   source      TEXT NOT NULL DEFAULT 'tip',   -- 'wire' | 'tip'
-  status      TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'filed'
+  status      TEXT NOT NULL DEFAULT 'open',  -- 'candidate' | 'open' | 'filed'
   date_added  TIMESTAMPTZ NOT NULL DEFAULT now(),
   date_filed  TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS blocked_companies (
+  id          SERIAL PRIMARY KEY,
+  person_id   TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  company     TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(person_id, company)
 );
 
 -- Seed the two default profiles if the table is empty.

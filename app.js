@@ -49,6 +49,28 @@ app.put("/api/people/:id", async (req, res) => {
   }
 });
 
+// ---- Blocked companies ("not a fit" list, per person) ----
+
+app.get("/api/people/:id/blocked-companies", async (req, res) => {
+  try {
+    res.json(await db.getBlockedCompanies(req.params.id));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not load blocklist." });
+  }
+});
+
+app.delete("/api/people/:id/blocked-companies/:company", async (req, res) => {
+  try {
+    // req.params.company is already URI-decoded once by Express's router — no need to decode again.
+    await db.unblockCompany(req.params.id, req.params.company);
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Could not update blocklist." });
+  }
+});
+
 // ---- Jobs ----
 
 app.get("/api/jobs", async (req, res) => {
@@ -103,6 +125,13 @@ app.patch("/api/jobs/:id", async (req, res) => {
 
 app.delete("/api/jobs/:id", async (req, res) => {
   try {
+    // Optional: "not a fit" spike also blocklists the employer for future searches.
+    // The frontend already has the job's personId/company in memory, so it sends them
+    // along rather than making us look the job up before we delete it.
+    const body = req.body || {};
+    if (body.blockCompany && body.personId) {
+      await db.blockCompany(body.personId, body.blockCompany);
+    }
     await db.deleteJob(req.params.id);
     res.status(204).end();
   } catch (err) {
@@ -141,6 +170,8 @@ app.post("/api/find-leads", async (req, res) => {
     const person = await db.getPerson(personId);
     if (!person) return res.status(404).json({ error: "No such person." });
 
+    const blocked = await db.getBlockedCompanies(personId);
+
     const Anthropic = require("@anthropic-ai/sdk");
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -151,6 +182,9 @@ app.post("/api/find-leads", async (req, res) => {
       "- Seeking: " + person.seniority + " roles in healthcare-adjacent journalism, editorial, or content roles.\n" +
       "- Location requirement: " + person.location + ".\n" +
       "- Additional interest area to weight toward: " + person.interests + ".\n\n" +
+      (blocked.length > 0
+        ? "The candidate has already said these employers are not a fit — do not suggest them again: " + blocked.join(", ") + ".\n\n"
+        : "") +
       "Search thoroughly and from multiple angles before answering: check direct company career pages, LinkedIn Jobs, Indeed, MediaBistro, JournalismJobs.com, and other reputable journalism/media/health-media job boards. Vary your search terms (job titles, employer names, beats) rather than stopping after a single search — use as many searches as you're given to genuinely cover this well.\n\n" +
       "Only include REAL, currently open postings you can directly verify from your search results — never invent a posting, employer, or URL. Note any evidence of how recent/active the listing is (a posting date, 'currently accepting applications' language, etc.) in the notes field. If a listing looks stale, expired, or you can't confirm it's still open, leave it out.\n\n" +
       "Respond with ONLY a JSON array (no markdown code fences, no commentary before or after) of up to 8 objects, each with exactly these keys: \"title\", \"company\", \"location\", \"url\", \"notes\" (one short sentence on why it fits this profile, plus any recency signal you found).";
@@ -161,6 +195,10 @@ app.post("/api/find-leads", async (req, res) => {
       messages: [{ role: "user", content: prompt }],
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 8 }],
     });
+
+    // The search call above is the point the API charge actually happens, success or not
+    // from here on — record it now so the frontend can warn against wasteful re-clicks.
+    await db.touchLastSearched(personId);
 
     const joined = (message.content || [])
       .filter((b) => b.type === "text")
@@ -176,10 +214,12 @@ app.post("/api/find-leads", async (req, res) => {
     // entry that's separate from the real Open board. Nothing lands on the actual board
     // until the frontend explicitly promotes one via PATCH /api/jobs/:id {status:"open"}.
     const existingUrls = await db.existingUrlsForPerson(personId);
+    const blockedLower = new Set(blocked.map((c) => c.toLowerCase()));
     let added = 0;
     for (const lead of leads) {
       if (!lead || !lead.title) continue;
       if (lead.url && existingUrls.has(lead.url)) continue; // already saved somewhere (candidate, open, or filed)
+      if (lead.company && blockedLower.has(lead.company.toLowerCase())) continue; // model ignored the blocklist instruction — filter it out anyway
       await db.addJob({
         id: uid(),
         personId,
@@ -207,5 +247,95 @@ app.post("/api/find-leads", async (req, res) => {
     res.status(502).json({ ok: false, added: 0, message: "Couldn't reach the wire. Try again in a moment." });
   }
 });
+
+// ---- URL preview (best-effort auto-fill for "File a tip") ----
+// Free — no AI call. Fetches the page server-side (avoids the browser's CORS restrictions)
+// and pulls a title/company guess out of its <title> and Open Graph meta tags.
+
+app.get("/api/fetch-preview", async (req, res) => {
+  const rawUrl = req.query.url;
+  if (!rawUrl || typeof rawUrl !== "string") return res.status(400).json({ error: "url is required." });
+
+  let target;
+  try {
+    target = new URL(rawUrl);
+  } catch (err) {
+    return res.status(400).json({ ok: false, message: "That doesn't look like a valid URL." });
+  }
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    return res.status(400).json({ ok: false, message: "Only http/https links are supported." });
+  }
+  const host = target.hostname.toLowerCase();
+  const isPrivateHost =
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "169.254.169.254" || // common cloud metadata endpoint — never fetch this
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host);
+  if (isPrivateHost) {
+    return res.status(400).json({ ok: false, message: "That URL isn't fetchable." });
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    let response;
+    try {
+      response = await fetch(target.toString(), {
+        signal: controller.signal,
+        redirect: "follow",
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; TheLeadDeskBot/1.0)" },
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      return res.json({ ok: false, message: "Couldn't fetch that page (status " + response.status + ")." });
+    }
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/html")) {
+      return res.json({ ok: false, message: "That URL doesn't look like a web page." });
+    }
+
+    const html = (await response.text()).slice(0, 500000); // cap how much we bother parsing
+    const title = extractTag(html, "title") || extractMeta(html, "og:title");
+    const company = extractMeta(html, "og:site_name");
+
+    res.json({ ok: true, title: title || "", company: company || "" });
+  } catch (err) {
+    console.error(err);
+    res.json({ ok: false, message: "Couldn't fetch details for that link — fine to fill in by hand." });
+  }
+});
+
+function extractTag(html, tag) {
+  const m = html.match(new RegExp("<" + tag + "[^>]*>([^<]*)</" + tag + ">", "i"));
+  return m ? decodeEntities(m[1].trim()) : "";
+}
+
+function extractMeta(html, property) {
+  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re1 = new RegExp('<meta[^>]+(?:property|name)=["\']' + escaped + '["\'][^>]+content=["\']([^"\']*)["\']', "i");
+  const m1 = html.match(re1);
+  if (m1) return decodeEntities(m1[1].trim());
+  // some pages order the attributes the other way around
+  const re2 = new RegExp('<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']' + escaped + '["\']', "i");
+  const m2 = html.match(re2);
+  return m2 ? decodeEntities(m2[1].trim()) : "";
+}
+
+function decodeEntities(s) {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
 
 module.exports = app;
