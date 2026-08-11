@@ -101,11 +101,14 @@ async function getJobs() {
 }
 
 async function addJob(job) {
+  // "candidate" = a Find-leads search result awaiting review, not yet on the real board.
+  // Anything else defaults to "open" (manually filed tips land straight on the board).
+  const status = job.status === "candidate" ? "candidate" : "open";
   const { rows } = await getPool().query(
     `INSERT INTO jobs (id, person_id, title, company, location, url, notes, source, status, date_added)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'open', now())
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
      RETURNING *`,
-    [job.id, job.personId, job.title, job.company || "", job.location || "", job.url || "", job.notes || "", job.source || "tip"]
+    [job.id, job.personId, job.title, job.company || "", job.location || "", job.url || "", job.notes || "", job.source || "tip", status]
   );
   return rowToJob(rows[0]);
 }

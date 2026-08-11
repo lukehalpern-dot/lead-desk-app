@@ -66,6 +66,9 @@ app.post("/api/jobs", async (req, res) => {
     if (!body.personId || !body.title) {
       return res.status(400).json({ error: "personId and title are required." });
     }
+    // source defaults to "tip" (manually filed). The Find leads preview flow explicitly
+    // passes "wire" when you choose to save a search result, so its badge stays accurate.
+    const source = body.source === "wire" ? "wire" : "tip";
     const job = await db.addJob({
       id: uid(),
       personId: body.personId,
@@ -74,7 +77,7 @@ app.post("/api/jobs", async (req, res) => {
       location: body.location,
       url: body.url,
       notes: body.notes,
-      source: "tip",
+      source,
     });
     res.status(201).json(job);
   } catch (err) {
@@ -128,7 +131,7 @@ app.post("/api/find-leads", async (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(200).json({
       ok: false,
-      added: 0,
+      leads: [],
       message:
         "Live search isn't turned on yet. Add an ANTHROPIC_API_KEY environment variable to enable it — see README.md.",
     });
@@ -169,11 +172,14 @@ app.post("/api/find-leads", async (req, res) => {
     if (start === -1 || end === -1) throw new Error("No results parsed from model response.");
     const leads = JSON.parse(cleaned.slice(start, end + 1));
 
+    // Every result gets saved as a "candidate" — a persistent, reviewable search-history
+    // entry that's separate from the real Open board. Nothing lands on the actual board
+    // until the frontend explicitly promotes one via PATCH /api/jobs/:id {status:"open"}.
     const existingUrls = await db.existingUrlsForPerson(personId);
     let added = 0;
     for (const lead of leads) {
       if (!lead || !lead.title) continue;
-      if (lead.url && existingUrls.has(lead.url)) continue;
+      if (lead.url && existingUrls.has(lead.url)) continue; // already saved somewhere (candidate, open, or filed)
       await db.addJob({
         id: uid(),
         personId,
@@ -183,6 +189,7 @@ app.post("/api/find-leads", async (req, res) => {
         url: lead.url || "",
         notes: lead.notes || "",
         source: "wire",
+        status: "candidate",
       });
       added++;
     }
@@ -190,7 +197,10 @@ app.post("/api/find-leads", async (req, res) => {
     res.json({
       ok: true,
       added,
-      message: added > 0 ? `${added} new lead${added === 1 ? "" : "s"} added.` : "No new leads this pass.",
+      message:
+        added > 0
+          ? `${added} new lead${added === 1 ? "" : "s"} found — review below and add the ones you want.`
+          : "No new leads this pass.",
     });
   } catch (err) {
     console.error(err);

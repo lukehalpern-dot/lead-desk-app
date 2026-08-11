@@ -103,7 +103,8 @@
     document.documentElement.style.setProperty("--accent", accentVar(p));
   }
 
-  function jobCardHTML(job, filed){
+  // mode: "open" | "filed" | "candidate"
+  function jobCardHTML(job, mode){
     var srcLabel = job.source === "wire" ? "WIRE" : "TIP";
     var srcClass = job.source === "wire" ? "src-wire" : "";
     var byline = [job.company, job.location].filter(Boolean).join(" — ");
@@ -111,15 +112,17 @@
     if(job.url){
       actions += '<a class="apply-link" href="'+escapeAttr(job.url)+'" target="_blank" rel="noopener noreferrer">Read the posting →</a>';
     }
-    if(!filed){
-      actions += '<button class="link-btn mark-filed" data-action="file" data-id="'+job.id+'">Mark filed</button>';
-    } else {
+    if(mode === "candidate"){
+      actions += '<button class="link-btn add-to-board" data-action="promote" data-id="'+job.id+'">Add to board</button>';
+    } else if(mode === "filed"){
       actions += '<button class="link-btn" data-action="reopen" data-id="'+job.id+'">Reopen</button>';
+    } else {
+      actions += '<button class="link-btn mark-filed" data-action="file" data-id="'+job.id+'">Mark filed</button>';
     }
     actions += '<button class="link-btn spike" data-action="spike" data-id="'+job.id+'">spike</button>';
 
     return (
-      '<div class="job-card">' +
+      '<div class="job-card'+(mode === "candidate" ? " job-card-candidate" : "")+'">' +
         '<div class="job-main">' +
           '<div class="eyebrow"><span class="'+srcClass+'">'+srcLabel+'</span><span>·</span><span>'+fmtDate(job.dateAdded)+'</span></div>' +
           '<div class="job-title">'+escapeHtml(job.title)+'</div>' +
@@ -127,29 +130,43 @@
           (job.notes ? '<div class="job-notes">'+escapeHtml(job.notes)+'</div>' : '') +
           '<div class="job-actions">'+actions+'</div>' +
         '</div>' +
-        (filed ? '<div class="stamp">FILED '+fmtDate(job.dateFiled)+'</div>' : '') +
+        (mode === "filed" ? '<div class="stamp">FILED '+fmtDate(job.dateFiled)+'</div>' : '') +
       '</div>'
     );
   }
 
   function renderJobs(){
+    var candidates = jobs.filter(function(j){ return j.personId === activePersonId && j.status === "candidate"; })
+                          .sort(function(a,b){ return (b.dateAdded||"").localeCompare(a.dateAdded||""); });
     var open = jobs.filter(function(j){ return j.personId === activePersonId && j.status === "open"; })
                     .sort(function(a,b){ return (b.dateAdded||"").localeCompare(a.dateAdded||""); });
     var filed = jobs.filter(function(j){ return j.personId === activePersonId && j.status === "filed"; })
                      .sort(function(a,b){ return (b.dateFiled||"").localeCompare(a.dateFiled||""); });
 
+    var candidatesSection = document.getElementById("candidatesSection");
+    var candidatesList = document.getElementById("candidatesList");
+    document.getElementById("candidatesSummary").textContent = "Search results (" + candidates.length + ")";
+    if(candidates.length === 0){
+      candidatesSection.classList.add("hidden");
+      candidatesList.innerHTML = "";
+    } else {
+      candidatesSection.classList.remove("hidden");
+      candidatesList.innerHTML = candidates.map(function(j){ return jobCardHTML(j, "candidate"); }).join("");
+    }
+
     var list = document.getElementById("jobList");
     if(open.length === 0){
       list.innerHTML = '<div class="empty-state">No open leads yet. Click "Find leads" to run a search, or file a tip you found yourself.</div>';
     } else {
-      list.innerHTML = open.map(function(j){ return jobCardHTML(j, false); }).join("");
+      list.innerHTML = open.map(function(j){ return jobCardHTML(j, "open"); }).join("");
     }
 
     document.getElementById("filedSummary").textContent = "Filed (" + filed.length + ")";
     var filedList = document.getElementById("filedList");
-    filedList.innerHTML = filed.length ? filed.map(function(j){ return jobCardHTML(j, true); }).join("")
+    filedList.innerHTML = filed.length ? filed.map(function(j){ return jobCardHTML(j, "filed"); }).join("")
       : '<div class="empty-state">Nothing filed yet.</div>';
 
+    candidatesList.querySelectorAll("[data-action]").forEach(bindJobAction);
     list.querySelectorAll("[data-action]").forEach(bindJobAction);
     filedList.querySelectorAll("[data-action]").forEach(bindJobAction);
   }
@@ -161,7 +178,10 @@
       var job = jobs.find(function(j){ return j.id === id; });
       if(!job) return;
       try{
-        if(action === "file"){
+        if(action === "promote"){
+          await api("/api/jobs/" + id, { method:"PATCH", body: JSON.stringify({ status:"open" }) });
+          job.status = "open";
+        } else if(action === "file"){
           await api("/api/jobs/" + id, { method:"PATCH", body: JSON.stringify({ status:"filed" }) });
           job.status = "filed";
           job.dateFiled = new Date().toISOString();

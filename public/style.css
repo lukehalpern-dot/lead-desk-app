@@ -337,6 +337,42 @@ details.filed-section summary{
 }
 details.filed-section summary::-webkit-details-marker{ display:none; }
 
+/* Search results (candidates awaiting review) */
+details.candidates-section{
+  margin:20px 0 0;
+  border:1px dashed var(--rule);
+  border-radius:var(--radius-md);
+  background:var(--panel);
+  padding:2px 16px 4px;
+}
+details.candidates-section.hidden{ display:none; }
+details.candidates-section summary{
+  cursor:pointer;
+  list-style:none;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  color:var(--ink-soft);
+  padding:10px 0 2px;
+}
+details.candidates-section summary::-webkit-details-marker{ display:none; }
+.section-hint{
+  font-size:12px;
+  color:var(--ink-faint);
+  margin:0 0 4px;
+}
+.job-card-candidate{ border-top:1px solid var(--rule); }
+.job-card-candidate:last-child{ border-bottom:none; }
+.link-btn.add-to-board{
+  color:var(--ink-soft);
+  text-decoration:none;
+  border:1px solid var(--rule);
+  padding:4px 9px;
+  border-radius:var(--radius-sm);
+}
+.link-btn.add-to-board:hover{ border-color:var(--accent); color:var(--accent); }
+
 /* Modal */
 .modal-overlay{
   position:fixed; inset:0;
