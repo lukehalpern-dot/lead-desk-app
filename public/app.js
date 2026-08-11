@@ -5,6 +5,7 @@
   var jobs = [];
   var blockedCompanies = {}; // personId -> [company, ...]
   var activePersonId = "p1";
+  var editingJobId = null;
 
   // A click within this window of the last completed search on the same profile
   // triggers a confirm() warning instead of running immediately — protects against
@@ -263,6 +264,7 @@
     if(job.url){
       actions += '<a class="apply-link" href="'+escapeAttr(job.url)+'" target="_blank" rel="noopener noreferrer">Read the posting →</a>';
     }
+    actions += '<button class="link-btn" data-action="edit" data-id="'+job.id+'">edit</button>';
     if(mode === "candidate"){
       actions += '<button class="link-btn add-to-board" data-action="promote" data-id="'+job.id+'">Add to board</button>';
       if(job.company){
@@ -334,6 +336,7 @@
       var action = el.getAttribute("data-action");
       var job = jobs.find(function(j){ return j.id === id; });
       if(!job) return;
+      if(action === "edit"){ openEditModal(job); return; }
       try{
         if(action === "promote"){
           await api("/api/jobs/" + id, { method:"PATCH", body: JSON.stringify({ status:"open" }) });
@@ -486,6 +489,47 @@
     }
   }
 
+  function openEditModal(job){
+    editingJobId = job.id;
+    document.getElementById("editTitle").value = job.title || "";
+    document.getElementById("editCompany").value = job.company || "";
+    document.getElementById("editLocation").value = job.location || "";
+    document.getElementById("editUrl").value = job.url || "";
+    document.getElementById("editNotes").value = job.notes || "";
+    document.getElementById("editModalOverlay").classList.remove("hidden");
+    document.getElementById("editTitle").focus();
+  }
+  function closeEditModal(){
+    document.getElementById("editModalOverlay").classList.add("hidden");
+    document.getElementById("editForm").reset();
+    editingJobId = null;
+  }
+
+  async function handleEditSubmit(e){
+    e.preventDefault();
+    if(!editingJobId) return;
+    var title = document.getElementById("editTitle").value.trim();
+    if(!title){ showStatus("Title can't be empty.", true); return; }
+    var payload = {
+      title: title,
+      company: document.getElementById("editCompany").value.trim(),
+      location: document.getElementById("editLocation").value.trim(),
+      url: document.getElementById("editUrl").value.trim(),
+      notes: document.getElementById("editNotes").value.trim()
+    };
+    try{
+      var updated = await api("/api/jobs/" + editingJobId, { method:"PATCH", body: JSON.stringify(payload) });
+      var idx = jobs.findIndex(function(j){ return j.id === editingJobId; });
+      if(idx !== -1) jobs[idx] = updated;
+      closeEditModal();
+      renderTabs();
+      renderJobs();
+    }catch(err){
+      console.error(err);
+      showStatus("Couldn't save those changes. Check your connection.", true);
+    }
+  }
+
   async function handleReset(){
     if(!confirm("Clear every lead from this shared board? This can't be undone.")) return;
     try{
@@ -569,6 +613,9 @@
     document.getElementById("lookupBtn").addEventListener("click", handleLookup);
     document.getElementById("resetBtn").addEventListener("click", handleReset);
     document.getElementById("exportBtn").addEventListener("click", handleExport);
+    document.getElementById("cancelEditBtn").addEventListener("click", closeEditModal);
+    document.getElementById("editModalOverlay").addEventListener("click", function(e){ if(e.target.id === "editModalOverlay") closeEditModal(); });
+    document.getElementById("editForm").addEventListener("submit", handleEditSubmit);
   }
 
   init();

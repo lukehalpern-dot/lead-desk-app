@@ -129,12 +129,33 @@ async function addJob(job) {
   return rowToJob(rows[0]);
 }
 
-async function setJobStatus(id, status) {
-  const dateFiled = status === "filed" ? "now()" : "NULL";
-  const { rows } = await getPool().query(
-    `UPDATE jobs SET status = $1, date_filed = ${dateFiled} WHERE id = $2 RETURNING *`,
-    [status, id]
-  );
+async function getJobById(id) {
+  const { rows } = await getPool().query("SELECT * FROM jobs WHERE id = $1", [id]);
+  return rows[0] ? rowToJob(rows[0]) : null;
+}
+
+// Partial update — handles both content edits (title/company/location/url/notes)
+// and status transitions (open/filed, with the date_filed side effect) in one call,
+// since a single PATCH request from the frontend can carry either or both.
+async function updateJob(id, fields) {
+  const contentFields = ["title", "company", "location", "url", "notes"];
+  const sets = [];
+  const values = [];
+  let i = 1;
+  for (const key of contentFields) {
+    if (Object.prototype.hasOwnProperty.call(fields, key)) {
+      sets.push(`${key} = $${i++}`);
+      values.push(fields[key]);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(fields, "status")) {
+    sets.push(`status = $${i++}`);
+    values.push(fields.status);
+    sets.push(`date_filed = ${fields.status === "filed" ? "now()" : "NULL"}`);
+  }
+  if (sets.length === 0) return getJobById(id);
+  values.push(id);
+  const { rows } = await getPool().query(`UPDATE jobs SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`, values);
   return rows[0] ? rowToJob(rows[0]) : null;
 }
 
@@ -214,7 +235,8 @@ module.exports = {
   touchLastSearched,
   getJobs,
   addJob,
-  setJobStatus,
+  getJobById,
+  updateJob,
   deleteJob,
   resetJobs,
   existingUrlsForPerson,

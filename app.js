@@ -117,11 +117,14 @@ app.post("/api/jobs", async (req, res) => {
 
 app.patch("/api/jobs/:id", async (req, res) => {
   try {
-    const status = req.body && req.body.status;
-    if (status !== "open" && status !== "filed") {
+    const body = req.body || {};
+    if (body.status !== undefined && body.status !== "open" && body.status !== "filed") {
       return res.status(400).json({ error: "status must be 'open' or 'filed'." });
     }
-    const job = await db.setJobStatus(req.params.id, status);
+    if (body.title !== undefined && !body.title.trim()) {
+      return res.status(400).json({ error: "Title can't be empty." });
+    }
+    const job = await db.updateJob(req.params.id, body);
     if (!job) return res.status(404).json({ error: "No such job." });
     res.json(job);
   } catch (err) {

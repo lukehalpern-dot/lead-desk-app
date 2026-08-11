@@ -87,6 +87,24 @@
   </div>
 </div>
 
+<div class="modal-overlay hidden" id="editModalOverlay">
+  <div class="modal">
+    <h2>Edit lead</h2>
+    <p class="hint">Fix up any of the details below.</p>
+    <form id="editForm">
+      <div class="field"><label for="editTitle">Job title *</label><input id="editTitle" required></div>
+      <div class="field"><label for="editCompany">Company</label><input id="editCompany"></div>
+      <div class="field"><label for="editLocation">Location</label><input id="editLocation" placeholder="e.g. Hybrid — NYC"></div>
+      <div class="field"><label for="editUrl">Posting URL</label><input id="editUrl" type="url" placeholder="https://"></div>
+      <div class="field"><label for="editNotes">Notes</label><textarea id="editNotes"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" id="cancelEditBtn">Cancel</button>
+        <button type="submit" class="btn primary">Save changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script src="/app.js"></script>
 </body>
 </html>
