@@ -176,40 +176,61 @@ app.post("/api/find-leads", async (req, res) => {
     });
   }
 
+  let person, blocked;
   try {
-    const person = await db.getPerson(personId);
+    person = await db.getPerson(personId);
     if (!person) return res.status(404).json({ error: "No such person." });
+    blocked = await db.getBlockedCompanies(personId);
+  } catch (err) {
+    console.error("find-leads: could not load profile/blocklist:", err);
+    return res.status(502).json({ ok: false, added: 0, message: "Couldn't load your profile. Check your connection and try again." });
+  }
 
-    const blocked = await db.getBlockedCompanies(personId);
+  const Anthropic = require("@anthropic-ai/sdk");
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-    const Anthropic = require("@anthropic-ai/sdk");
-    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const prompt =
+    "You are sourcing job leads for a working journalist.\n" +
+    "Candidate profile:\n" +
+    "- Current role: journalist at MJH Life Sciences, writes for Pharmacy Times (a healthcare/clinical trade publication); over two years there plus a prior summer internship on the same team.\n" +
+    "- Seeking: " + person.seniority + " roles in healthcare-adjacent journalism, editorial, or content roles.\n" +
+    "- Location requirement: " + person.location + ".\n" +
+    "- Additional interest area to weight toward: " + person.interests + ".\n\n" +
+    (blocked.length > 0
+      ? "The candidate has already said these employers are not a fit — do not suggest them again: " + blocked.join(", ") + ".\n\n"
+      : "") +
+    "Search efficiently across a few of the most relevant sources for this profile (direct company career pages, LinkedIn Jobs, Indeed, MediaBistro, JournalismJobs.com, or similar reputable journalism/media/health-media job boards) rather than exhaustively covering all of them — favor finishing promptly over maximum coverage.\n\n" +
+    "Only include REAL, currently open postings you can directly verify from your search results — never invent a posting, employer, or URL. Note any evidence of how recent/active the listing is (a posting date, 'currently accepting applications' language, etc.) in the notes field. If a listing looks stale, expired, or you can't confirm it's still open, leave it out.\n\n" +
+    "Respond with ONLY a JSON array (no markdown code fences, no commentary before or after) of up to 5 objects, each with exactly these keys: \"title\", \"company\", \"location\", \"url\", \"notes\" (one short sentence on why it fits this profile, plus any recency signal you found).";
 
-    const prompt =
-      "You are sourcing job leads for a working journalist.\n" +
-      "Candidate profile:\n" +
-      "- Current role: journalist at MJH Life Sciences, writes for Pharmacy Times (a healthcare/clinical trade publication); over two years there plus a prior summer internship on the same team.\n" +
-      "- Seeking: " + person.seniority + " roles in healthcare-adjacent journalism, editorial, or content roles.\n" +
-      "- Location requirement: " + person.location + ".\n" +
-      "- Additional interest area to weight toward: " + person.interests + ".\n\n" +
-      (blocked.length > 0
-        ? "The candidate has already said these employers are not a fit — do not suggest them again: " + blocked.join(", ") + ".\n\n"
-        : "") +
-      "Search thoroughly and from multiple angles before answering: check direct company career pages, LinkedIn Jobs, Indeed, MediaBistro, JournalismJobs.com, and other reputable journalism/media/health-media job boards. Vary your search terms (job titles, employer names, beats) rather than stopping after a single search — use as many searches as you're given to genuinely cover this well.\n\n" +
-      "Only include REAL, currently open postings you can directly verify from your search results — never invent a posting, employer, or URL. Note any evidence of how recent/active the listing is (a posting date, 'currently accepting applications' language, etc.) in the notes field. If a listing looks stale, expired, or you can't confirm it's still open, leave it out.\n\n" +
-      "Respond with ONLY a JSON array (no markdown code fences, no commentary before or after) of up to 8 objects, each with exactly these keys: \"title\", \"company\", \"location\", \"url\", \"notes\" (one short sentence on why it fits this profile, plus any recency signal you found).";
-
-    const message = await anthropic.messages.create({
+  // Stage 1: the actual paid search call. This is where money gets spent — everything
+  // after this point is "free" in the sense that the charge already happened regardless
+  // of whether it succeeds. Kept in its own try/catch so a failure here (the only stage
+  // that can plausibly be a network/timeout issue) gets a distinct, honest message.
+  let message;
+  try {
+    message = await anthropic.messages.create({
       model: "claude-sonnet-5",
-      max_tokens: 3000,
+      max_tokens: 2000,
       messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 8 }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 4 }],
     });
+  } catch (err) {
+    console.error("find-leads: Anthropic API call failed:", err);
+    return res.status(502).json({
+      ok: false,
+      added: 0,
+      message: "The search itself didn't complete (network issue or an Anthropic API error) — try again in a moment. If this keeps happening on the same network specifically, it's likely a slow/unstable connection cutting the request off before it finishes.",
+    });
+  }
 
-    // The search call above is the point the API charge actually happens, success or not
-    // from here on — record it now so the frontend can warn against wasteful re-clicks.
-    await db.touchLastSearched(personId);
+  // Record that the (now-billed) search ran, so the frontend's re-click guardrail sees it —
+  // but don't let a DB hiccup here mask what actually happened in the stages below.
+  db.touchLastSearched(personId).catch((err) => console.error("find-leads: could not record last-searched time:", err));
 
+  // Stage 2: parse the model's response.
+  let leads;
+  try {
     const joined = (message.content || [])
       .filter((b) => b.type === "text")
       .map((b) => b.text)
@@ -217,12 +238,21 @@ app.post("/api/find-leads", async (req, res) => {
     const cleaned = joined.replace(/```json/g, "").replace(/```/g, "").trim();
     const start = cleaned.indexOf("[");
     const end = cleaned.lastIndexOf("]");
-    if (start === -1 || end === -1) throw new Error("No results parsed from model response.");
-    const leads = JSON.parse(cleaned.slice(start, end + 1));
+    if (start === -1 || end === -1) throw new Error("No JSON array found in the model's response.");
+    leads = JSON.parse(cleaned.slice(start, end + 1));
+  } catch (err) {
+    console.error("find-leads: could not parse model response:", err, JSON.stringify(message.content));
+    return res.status(502).json({
+      ok: false,
+      added: 0,
+      message: "The search ran (and was billed) but its results came back in a format we couldn't read — likely a one-off. Try again.",
+    });
+  }
 
-    // Every result gets saved as a "candidate" — a persistent, reviewable search-history
-    // entry that's separate from the real Open board. Nothing lands on the actual board
-    // until the frontend explicitly promotes one via PATCH /api/jobs/:id {status:"open"}.
+  // Stage 3: save the results. Every result gets saved as a "candidate" — a persistent,
+  // reviewable search-history entry that's separate from the real Open board. Nothing lands
+  // on the actual board until the frontend explicitly promotes one to status "open".
+  try {
     const existingUrls = await db.existingUrlsForPerson(personId);
     const blockedLower = new Set(blocked.map((c) => c.toLowerCase()));
     let added = 0;
@@ -253,8 +283,12 @@ app.post("/api/find-leads", async (req, res) => {
           : "No new leads this pass.",
     });
   } catch (err) {
-    console.error(err);
-    res.status(502).json({ ok: false, added: 0, message: "Couldn't reach the wire. Try again in a moment." });
+    console.error("find-leads: could not save results:", err);
+    res.status(502).json({
+      ok: false,
+      added: 0,
+      message: "The search ran (and was billed) and found results, but saving them failed — check your connection and try again.",
+    });
   }
 });
 
